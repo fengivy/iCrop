@@ -2,27 +2,31 @@ package com.ivy.icrop;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.Matrix;
 import android.graphics.RectF;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
-import android.graphics.drawable.ScaleDrawable;
 import android.support.annotation.Nullable;
 import android.util.AttributeSet;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.ViewTreeObserver;
+
+import java.util.Arrays;
 
 /**
  * Created by ivy on 2016/4/6.
  */
 public class ICropImageView extends TranslationImageView implements ViewTreeObserver.OnGlobalLayoutListener{
-    //最后移动的位置
-    private float lastMoveX,lastMoveY;
     private ScaleGestureDetector mScaleGestureDetector;
+    private RotationGestureDetector mRotationGestureDetector;
+    private GestureDetector mGestureDetector;
     private static float MAX_SCALE=5,MIN_SCALE=1;
     private float middleX,middleY;
     private float mMaxResultImageSizeX=0;
     private float mMaxResultImageSizeY=0;
+    private Matrix mHelpMatrix;
 
     public ICropImageView(Context context) {
         super(context);
@@ -45,6 +49,7 @@ public class ICropImageView extends TranslationImageView implements ViewTreeObse
     }
 
     private void initCrop() {
+        mHelpMatrix=new Matrix();
         mScaleGestureDetector=new ScaleGestureDetector(getContext(), new ScaleGestureDetector.SimpleOnScaleGestureListener(){
             @Override
             public boolean onScale(ScaleGestureDetector detector) {
@@ -83,99 +88,138 @@ public class ICropImageView extends TranslationImageView implements ViewTreeObse
                 return true;
             }
         });
+        mRotationGestureDetector=new RotationGestureDetector(getContext(), new RotationGestureDetector.OnDegreesChangeListener() {
+            @Override
+            public void onDegreesChange(double degress) {
+                postRotation((float) degress);
+            }
+        });
+
+        mGestureDetector=new GestureDetector(getContext(),new GestureDetector.SimpleOnGestureListener(){
+            @Override
+            public boolean onScroll(MotionEvent e1, MotionEvent e2, float distanceX, float distanceY) {
+                postTranslation(-distanceX, -distanceY);
+                return true;
+            }
+
+            @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                postScale(1.2f,e.getX(),e.getY());
+                return super.onDoubleTap(e);
+            }
+        });
     }
 
-    private int lastPointerCount;
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        /**
-         * 每当触摸点发生变化时，重置lastMoveX , lastMoveY
-         */
-        if (event.getPointerCount() != lastPointerCount)
-        {
-            lastMoveX = event.getX();
-            lastMoveY = event.getY();
-        }
-        lastPointerCount=event.getPointerCount();
-        int action=event.getAction();
-        switch (action){
-            case MotionEvent.ACTION_DOWN:
-                lastMoveX = event.getX();
-                lastMoveY = event.getY();
-                break;
-            case MotionEvent.ACTION_MOVE:
-                translation(event.getX(),event.getY());
-                break;
-            case MotionEvent.ACTION_UP:
-                break;
-            case MotionEvent.ACTION_CANCEL:
-                break;
-            default:
-                break;
-        }
         if (event.getPointerCount()>1){
             middleX = (event.getX(0) + event.getX(1)) / 2;
             middleY = (event.getY(0) + event.getY(1)) / 2;
         }
+        mGestureDetector.onTouchEvent(event);
         mScaleGestureDetector.onTouchEvent(event);
-        return true;
-    }
-
-    boolean isCheckTopAndBottom,isCheckLeftAndRight;
-    private void translation(float x,float y){
-        float dx=x-lastMoveX;
-        float dy=y-lastMoveY;
-        RectF rectF=getMatrixRectF();
-        if (getDrawable() != null)
-        {
-            isCheckTopAndBottom = isCheckLeftAndRight = true;
-            // 如果宽度小于屏幕宽度，则禁止左右移动
-            if (rectF.width() < getWidth())
-            {
-                dx = 0;
-                isCheckLeftAndRight = false;
-            }
-            // 如果高度小于屏幕高度，则禁止上下移动
-            if (rectF.height() < getHeight())
-            {
-                dy = 0;
-                isCheckTopAndBottom = false;
-            }
-            postTranslation(dx,dy);
-            checkMatrixBounds();
+        mRotationGestureDetector.onTouchEvent(event);
+        if ((event.getAction() & MotionEvent.ACTION_MASK) == MotionEvent.ACTION_UP) {
+            setImageToWrapCropBounds();
         }
-        lastMoveX=x;
-        lastMoveY=y;
+        return true;
     }
 
     /**
      * 移动时，进行边界判断，主要判断宽或高大于屏幕的
      */
-    private void checkMatrixBounds()
+    private void setImageToWrapCropBounds()
     {
-        RectF rect = getMatrixRectF();
+        if(isImageWrapCropBounds(mCurrentImageCorners))
+            return;
+        float viewCenterX=getWidth()/2;
+        float viewCenterY=getHeight()/2;
+        float imageCenterX=mCurrentImageCenter[0];
+        float imageCenterY=mCurrentImageCenter[1];
+        float deltaX=viewCenterX-imageCenterX;
+        float deltaY=viewCenterY-imageCenterY;
+        float deltaScale=0;
 
-        float deltaX = 0, deltaY = 0;
-        final float viewWidth = getWidth();
-        final float viewHeight = getHeight();
-        // 判断移动或缩放后，图片显示是否超出屏幕边界
-        if (rect.top > 0 && isCheckTopAndBottom)
-        {
-            deltaY = -rect.top;
-        }
-        if (rect.bottom < viewHeight && isCheckTopAndBottom)
-        {
-            deltaY = viewHeight - rect.bottom;
-        }
-        if (rect.left > 0 && isCheckLeftAndRight)
-        {
-            deltaX = -rect.left;
-        }
-        if (rect.right < viewWidth && isCheckLeftAndRight)
-        {
-            deltaX = viewWidth - rect.right;
+        mHelpMatrix.reset();
+        mHelpMatrix.setTranslate(deltaX, deltaY);
+        final float[] tempCurrentImageCorners= Arrays.copyOf(mCurrentImageCorners,mCurrentImageCorners.length);
+        mHelpMatrix.mapPoints(tempCurrentImageCorners);
+
+        boolean willTranslation=isImageWrapCropBounds(tempCurrentImageCorners);
+        System.out.println("-------------willtrans:"+willTranslation);
+        if (willTranslation){
+            final float[] imageIndents=calculateImageIndents();
+            deltaX = -(imageIndents[0] + imageIndents[2]);
+            deltaY = -(imageIndents[1] + imageIndents[3]);
+        }else{
+            RectF tempCropRect = new RectF(0,0,getWidth(),getHeight());
+            mHelpMatrix.reset();
+            mHelpMatrix.setRotate(getCurrentAngle());
+            mHelpMatrix.mapRect(tempCropRect);
+
+            final float[] currentImageSides = RectUtils.getRectSidesFromCorners(mCurrentImageCorners);
+
+            deltaScale = Math.max(tempCropRect.width() / currentImageSides[0],
+                    tempCropRect.height() / currentImageSides[1]);
+            // Ugly but there are always couple pixels that want to hide because of all these calculations
+            deltaScale *= 1.01;
+            deltaScale = deltaScale * getCurrentScale() - getCurrentScale();
         }
         postTranslation(deltaX, deltaY);
+        if (!willTranslation) {
+            zoomInImage(getCurrentScale() + deltaScale, getWidth()/2, getHeight()/2);
+        }
+
+    }
+
+    private void zoomInImage(float scale, int centerX, int centerY) {
+        if (scale <= MAX_SCALE) {
+            postScale(scale / getCurrentScale(), centerX, centerY);
+        }
+    }
+
+    private float[] calculateImageIndents() {
+        mHelpMatrix.reset();
+        mHelpMatrix.setRotate(-getCurrentAngle());
+
+        float[] unrotatedImageCorners = Arrays.copyOf(mCurrentImageCorners, mCurrentImageCorners.length);
+        float[] unrotatedCropBoundsCorners = RectUtils.getCornersFromRect(new RectF(0,0,getWidth(),getHeight()));
+
+        mHelpMatrix.mapPoints(unrotatedImageCorners);
+        mHelpMatrix.mapPoints(unrotatedCropBoundsCorners);
+
+        RectF unrotatedImageRect = RectUtils.trapToRect(unrotatedImageCorners);
+        RectF unrotatedCropRect = RectUtils.trapToRect(unrotatedCropBoundsCorners);
+
+        float deltaLeft = unrotatedImageRect.left - unrotatedCropRect.left;
+        float deltaTop = unrotatedImageRect.top - unrotatedCropRect.top;
+        float deltaRight = unrotatedImageRect.right - unrotatedCropRect.right;
+        float deltaBottom = unrotatedImageRect.bottom - unrotatedCropRect.bottom;
+
+        float indents[] = new float[4];
+        indents[0] = (deltaLeft > 0) ? deltaLeft : 0;
+        indents[1] = (deltaTop > 0) ? deltaTop : 0;
+        indents[2] = (deltaRight < 0) ? deltaRight : 0;
+        indents[3] = (deltaBottom < 0) ? deltaBottom : 0;
+        mHelpMatrix.reset();
+        mHelpMatrix.setRotate(getCurrentAngle());
+        mHelpMatrix.mapPoints(indents);
+        return indents;
+
+    }
+
+    private boolean isImageWrapCropBounds(float[] imageCorners) {
+        mHelpMatrix.reset();
+        mHelpMatrix.setRotate(-getCurrentAngle());
+
+        float[] unRotatedImageCorners=Arrays.copyOf(imageCorners,imageCorners.length);
+        mHelpMatrix.mapPoints(unRotatedImageCorners);
+
+
+
+        float[] unrotatedCropBoundsCorners=RectUtils.getCornersFromRect(new RectF(0,0,getWidth(),getHeight()));
+        mHelpMatrix.mapPoints(unrotatedCropBoundsCorners);
+        return RectUtils.trapToRect(unRotatedImageCorners).contains(RectUtils.trapToRect(unrotatedCropBoundsCorners));
     }
 
     @Override
@@ -229,7 +273,8 @@ public class ICropImageView extends TranslationImageView implements ViewTreeObse
     @Nullable
     public Bitmap cropImage(RectF cropRect) {
         Bitmap viewBitmap = getViewBitmap();
-        if (viewBitmap == null || viewBitmap.isRecycled()) {
+        Bitmap cropBitmap=viewBitmap;
+        if (cropBitmap == null || cropBitmap.isRecycled()) {
             System.out.println("----------------bitmap null");
             return null;
         }
@@ -256,36 +301,36 @@ public class ICropImageView extends TranslationImageView implements ViewTreeObse
                 float scaleY = mMaxResultImageSizeY / cropHeight;
                 float resizeScale = Math.min(scaleX, scaleY);
 
-                Bitmap resizedBitmap = Bitmap.createScaledBitmap(viewBitmap,
-                        (int) (viewBitmap.getWidth() * resizeScale),
-                        (int) (viewBitmap.getHeight() * resizeScale), false);
-                if (viewBitmap != resizedBitmap) {
-                    viewBitmap.recycle();
+                Bitmap resizedBitmap = Bitmap.createScaledBitmap(cropBitmap,
+                        (int) (cropBitmap.getWidth() * resizeScale),
+                        (int) (cropBitmap.getHeight() * resizeScale), false);
+                if (cropBitmap != resizedBitmap) {
+                    //cropBitmap.recycle();
                 }
-                viewBitmap = resizedBitmap;
+                cropBitmap = resizedBitmap;
 
                 currentScale /= resizeScale;
             }
         }
+        float currentAngle=getCurrentAngle();
+        if (currentAngle != 0) {
+            mHelpMatrix.reset();
+            mHelpMatrix.setRotate(currentAngle, cropBitmap.getWidth() / 2, cropBitmap.getHeight() / 2);
 
-        /*if (currentAngle != 0) {
-            mTempMatrix.reset();
-            mTempMatrix.setRotate(currentAngle, viewBitmap.getWidth() / 2, viewBitmap.getHeight() / 2);
-
-            Bitmap rotatedBitmap = Bitmap.createBitmap(viewBitmap, 0, 0, viewBitmap.getWidth(), viewBitmap.getHeight(),
-                    mTempMatrix, true);
-            if (viewBitmap != rotatedBitmap) {
-                viewBitmap.recycle();
+            Bitmap rotatedBitmap = Bitmap.createBitmap(cropBitmap, 0, 0, cropBitmap.getWidth(), cropBitmap.getHeight(),
+                    mHelpMatrix, true);
+            if (cropBitmap != rotatedBitmap) {
+                //cropBitmap.recycle();
             }
-            viewBitmap = rotatedBitmap;
-        }*/
+            cropBitmap = rotatedBitmap;
+        }
 
         int top = (int) ((cropRect.top - currentImageRect.top) / currentScale);
         int left = (int) ((cropRect.left - currentImageRect.left) / currentScale);
         int width = (int) (cropRect.width() / currentScale);
         int height = (int) (cropRect.height() / currentScale);
 
-        return Bitmap.createBitmap(viewBitmap, left, top, width, height);
+        return Bitmap.createBitmap(cropBitmap, left, top, width, height);
     }
 
     @Nullable

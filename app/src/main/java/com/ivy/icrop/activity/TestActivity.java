@@ -40,7 +40,7 @@ public class TestActivity extends AppCompatActivity{
             @Override
             public void onClick(View v) {
                 scale -= 0.2;
-                mImageView.getICropImageView().postScale(1.2f);
+                mImageView.getICropImageView().postRotation(10f);
             }
         });
         this.findViewById(R.id.btn_down).setOnClickListener(new View.OnClickListener() {

@@ -71,6 +71,11 @@ public class TranslationImageView extends ImageView{
         this.setImageMatrix(currentMatrix);
     }
 
+    public void postRotation(float degrees){
+        currentMatrix.postRotate(degrees,getWidth()/2,getHeight()/2);
+        this.setImageMatrix(currentMatrix);
+    }
+
     /**
      * 根据当前图片的Matrix获得图片的范围
      *
@@ -97,6 +102,21 @@ public class TranslationImageView extends ImageView{
     public void setImageMatrix(Matrix matrix) {
         super.setImageMatrix(matrix);
         updateCurrentImagePoints();
+    }
+
+    /**
+     * @return - current image rotation angle.
+     */
+    public float getCurrentAngle() {
+        return getMatrixAngle(currentMatrix);
+    }
+
+    /**
+     * This method calculates rotation angle for given Matrix object.
+     */
+    public float getMatrixAngle(@NonNull Matrix matrix) {
+        return (float) -(Math.atan2(getMatrixValue(matrix, Matrix.MSKEW_X),
+                getMatrixValue(matrix, Matrix.MSCALE_X)) * (180 / Math.PI));
     }
 
     /**
